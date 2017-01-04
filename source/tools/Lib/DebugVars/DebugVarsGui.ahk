@@ -247,7 +247,8 @@ class DvContextNode extends DvPropertyParentNode
     }
     
     GetWindowTitle() {
-        return this.context=0 ? "Local vars" : this.context=1 ? "Static vars" : "Global vars"
+        this.dbg.property_get("-n A_IsDll", response)
+        return this.context=0 ? "Local vars" : (DBGp_Base64UTF8Decode(DvLoadXml(response).selectSingleNode("/response/property").text)!="" & this.context=1 ? "Static vars" : "Global vars")
     }
     
     Update(tlv) {
@@ -266,7 +267,8 @@ class Dv2ContextsNode extends DvNodeBase
     
     GetChildren() {
         children := []
-        Loop 3 {
+        this.dbg.property_get("-n A_IsDll", response)
+        Loop % 2 + DBGp_Base64UTF8Decode(DvLoadXml(response).selectSingleNode("/response/property").text)!="" {
             children[A_Index] := new DvContextNode(this.dbg, A_Index-1)
             children[A_Index].expanded := true
         }
