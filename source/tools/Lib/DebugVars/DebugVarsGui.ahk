@@ -268,7 +268,7 @@ class Dv2ContextsNode extends DvNodeBase
     GetChildren() {
         children := []
         this.dbg.property_get("-n A_IsDll", response)
-        Loop % 2 + DBGp_Base64UTF8Decode(DvLoadXml(response).selectSingleNode("/response/property").text)!="" {
+        Loop % 2 +(DBGp_Base64UTF8Decode(DvLoadXml(response).selectSingleNode("/response/property").text)!="") {
             children[A_Index] := new DvContextNode(this.dbg, A_Index-1)
             children[A_Index].expanded := true
         }
