@@ -247,7 +247,8 @@ class DvContextNode extends DvPropertyParentNode
     }
     
     GetWindowTitle() {
-        return this.context=0 ? "Local vars" : "Global vars"
+        this.dbg.context_names(, response)
+        return DvLoadXml(response).SelectNodes("/response/context/@name").Item(this.context).text " vars"
     }
     
     Update(tlv) {
@@ -266,7 +267,8 @@ class Dv2ContextsNode extends DvNodeBase
     
     GetChildren() {
         children := []
-        Loop 2 {
+        this.dbg.context_names(, response)
+        Loop % DvLoadXml(response).SelectNodes("/response/context").Length {
             children[A_Index] := new DvContextNode(this.dbg, A_Index-1)
             children[A_Index].expanded := true
         }
