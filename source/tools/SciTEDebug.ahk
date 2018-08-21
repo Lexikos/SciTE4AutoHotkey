@@ -1082,15 +1082,21 @@ SaveDvWindows()
 		*/
 		else
 			continue
-		++count
 		
-		; Save position
+		WinGet minmax, MinMax, % "ahk_id " dv.hGui
+		if minmax = -1
+			continue
+		opt := (DllCall("IsWindowVisible", "ptr", dv.hGui) ? "" : " Hide")
+			.  (minmax = 1 ? " Maximize" : "")
+		if minmax = 1 ; Restore to retrieve non-maximized position
+			WinRestore % "ahk_id " dv.hGui
+		
+		; Save position and state
 		WinGetPos x, y,,, % "ahk_id " dv.hGui
 		DllCall("GetClientRect", "ptr", dv.hGui, "ptr", &rect)
 		w := NumGet(rect, 8, "int")
 		h := NumGet(rect, 12, "int")
-		opt := DllCall("IsWindowVisible", "ptr", dv.hGui) ? "" : " Hide"
-		IniWrite x%x% y%y% w%w% h%h%%opt%`, %type%, %Dbg_Ini%, Windows, %count%
+		IniWrite x%x% y%y% w%w% h%h%%opt%`, %type%, %Dbg_Ini%, Windows, % ++count
 	}
 }
 
