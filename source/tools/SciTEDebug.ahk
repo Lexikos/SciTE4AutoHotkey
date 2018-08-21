@@ -939,6 +939,7 @@ Dbg_Continue(cmd)
 	SciTE_ToggleRunButton()
 	VE_Close()
 	ST_Clear()
+	DvContextNode.depth := 0
 }
 
 ;}
@@ -1010,6 +1011,8 @@ if A_GuiEvent != DoubleClick
 SciTE_EnsureFileIsOpen(aStackFile[A_EventInfo])
 SciTE_SetCurrentLine(aStackLine[A_EventInfo], 0)
 WinActivate, ahk_id %scitehwnd%
+DvContextNode.depth := A_EventInfo-1
+DvRefreshAll()
 return
 
 STGuiClose:
