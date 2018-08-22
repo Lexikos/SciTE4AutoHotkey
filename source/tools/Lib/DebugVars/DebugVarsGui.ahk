@@ -2,11 +2,23 @@
 #Include VarTreeGui.ahk
 #Include VarEditGui.ahk
 
+DvArg(dbg, a) { ; Quote parameter value 'a' if appropriate/supported
+    if !InStr(a, " ")
+        return a
+    ; Parameter values including a space "must" be quoted, according to
+    ; the spec (draft 21, 2018-01-09), but this requires v1.1.30+.
+    if !ObjHasKey(dbg, "can_quote") { ; Support not yet determined
+        dbg.feature_get("-n ""feature_get""", response)
+        ObjRawSet(dbg, "can_quote", InStr(response, "supported=""1""") != 0)
+    }
+    return dbg.can_quote ? """" RegExReplace(a, "[""\\]", "\$0") """" : a
+}
+
 DvInspectProperty(dbg, fullname, extra_args:="", show_opt:="") {
     dbg.feature_set("-n max_depth -v 1")
     ; 1MB seems reasonably permissive.  Note that -m 0 (unlimited
     ; according to the spec) doesn't work with v1.1.24.02 and earlier.
-    dbg.property_get("-m 1048576 -n " fullname (extra_args="" ? "" : " " extra_args), response)
+    dbg.property_get("-m 1048576 -n" DvArg(dbg, fullname) (extra_args="" ? "" : " " extra_args), response)
     dbg.feature_set("-n max_depth -v 0")
     prop := DvLoadXml(response).selectSingleNode("/response/property")
     
@@ -19,7 +31,7 @@ DvInspectProperty(dbg, fullname, extra_args:="", show_opt:="") {
     if (type != "object") {
         isReadOnly := prop.getAttribute("facet") = "Builtin"
         value := DBGp_Base64UTF8Decode(prop.text)
-        dv := new DebugVarGui(dbg, {name: fullname, value: value, type: type, readonly: isReadOnly})
+        dv := new DebugVarGui(dbg, {name: fullname, value: value, type: type, readonly: isReadOnly, args: extra_args})
     }
     else {
         dv := new DebugVarsGui(new DvPropertyNode(dbg, prop))
@@ -35,21 +47,21 @@ class DebugVarGui extends VarEditGui
     }
     
     OnSave(value, type) {
-        DvSetProperty(this.dbg, this.var.name, value, type)
+        DvSetProperty(this.dbg, this.var.name, value, type, this.var.args)
         this.var.value := value
         this.var.type := type
         DvRefreshAll()
     }
 }
 
-DvSetProperty(dbg, fullname, ByRef value, type, ByRef response:="") {
+DvSetProperty(dbg, fullname, ByRef value, type, args:="", ByRef response:="") {
     if (type = "integer")
         value := format("{:i}", value) ; Force decimal format.
     if (type = "integer" || type = "float") && dbg.no_base64_numbers
         data := value
     else
         data := DBGp_Base64UTF8Encode(value)
-    dbg.property_set("-n " fullname " -t " type " -- " data, response)
+    dbg.property_set("-n" DvArg(dbg, fullname) " -t" type (args="" ? "" : " " args) " -- " data, response)
 }
 
 class DvNodeBase extends TreeListView._Base
@@ -86,7 +98,7 @@ class DvNodeBase extends TreeListView._Base
 
 class DvPropertyParentNode extends DvNodeBase
 {
-    UpdateChildren(tlv, props) {
+    UpdateChildren(tlv, props, args:="") {
         children := this.children
         if !children {
             if !props.length
@@ -98,12 +110,12 @@ class DvPropertyParentNode extends DvNodeBase
             if (np < props.length) {
                 prop := props.item(np)
                 if (nc > children.Length() || prop.getAttribute("name") < children[nc].name) {
-                    tlv.InsertChild(this, nc, new DvPropertyNode(this.dbg, prop))
+                    tlv.InsertChild(this, nc, new DvPropertyNode(this.dbg, prop, args))
                     ++nc, ++np
                     continue
                 }
                 if (prop.getAttribute("name") = children[nc].name) {
-                    children[nc].Update(tlv, prop)
+                    children[nc].Update(tlv, prop, args)
                     ++nc, ++np
                     continue
                 }
@@ -117,14 +129,15 @@ class DvPropertyParentNode extends DvNodeBase
 
 class DvPropertyNode extends DvPropertyParentNode
 {
-    __new(dbg, prop) {
+    __new(dbg, prop, args:="") {
         this.dbg := dbg
         this.fullname := prop.getAttribute("fullname")
         this.name := prop.getAttribute("name")
         this.xml := prop
+        this.args := args
         props := prop.selectNodes("property")
         if props.length {
-            this.children := this.FromXmlNodes(props, dbg)
+            this.children := this.FromXmlNodes(props, dbg, args)
             ObjRawSet(this, "expanded", false)
         }
         else {
@@ -144,10 +157,10 @@ class DvPropertyNode extends DvPropertyParentNode
         }
     }
     
-    FromXmlNodes(props, dbg) {
+    FromXmlNodes(props, dbg, args:="") {
         nodes := []
         for prop in props
-            nodes.Push(new DvPropertyNode(dbg, prop))
+            nodes.Push(new DvPropertyNode(dbg, prop, args))
         return nodes
     }
     
@@ -159,7 +172,7 @@ class DvPropertyNode extends DvPropertyParentNode
     
     GetProperty() {
         this.dbg.feature_set("-n max_depth -v 1")
-        this.dbg.property_get("-n " this.fullname, response)
+        this.dbg.property_get("-n" DvArg(this.dbg, this.fullname) (this.args="" ? "" : " " this.args), response)
         this.dbg.feature_set("-n max_depth -v 0")
         xml := DvLoadXml(response)
         return this.xml := xml.selectSingleNode("/response/property")
@@ -168,7 +181,7 @@ class DvPropertyNode extends DvPropertyParentNode
     GetChildren() {
         prop := this.GetProperty()
         props := prop.selectNodes("property")
-        return DvPropertyNode.FromXmlNodes(props, this.dbg)
+        return DvPropertyNode.FromXmlNodes(props, this.dbg, this.args)
     }
     
     GetValueString() {
@@ -195,7 +208,7 @@ class DvPropertyNode extends DvPropertyParentNode
         else
             type := "string"
         DvSetProperty(this.dbg, this.xml.getAttribute("fullname")
-            , value, type, response)
+            , value, type, this.args, response)
         if InStr(response, "<error") || InStr(response, "success=""0""")
             return false
         ; Update .xml for @classname and @children, and in case the value
@@ -204,25 +217,35 @@ class DvPropertyNode extends DvPropertyParentNode
         this.value := value := DBGp_Base64UTF8Decode(this.xml.text)
     }
     
-    Update(tlv, prop:="") {
+    Update(tlv, prop:="", args:="") {
+        (args != "") && this.args := args
         had_children := this.xml.getAttribute("children")
-        if !prop || prop.getAttribute("children") && !prop.selectSingleNode("property")
+        if !prop
+            || this.expanded  ; Children were visible.
+                && prop.getAttribute("children")  ; Still has children.
+                && !prop.selectSingleNode("property")  ; None present in the XML.
             prop := this.GetProperty()
-        else
+        else {
+            if had_children && !this.expanded {
+                ObjDelete(this, "expanded")  ; Force update on next expansion.
+                ObjDelete(this, "children")
+            }
             this.xml := prop
+        }
         props := prop.selectNodes("property")
         value2 := this.values[2]
         this.value := props.length ? "" : DBGp_Base64UTF8Decode(prop.text)
-        if !(this.values[2] "" ==  "" value2) ; Prevent unnecessary redraw and flicker.
+        if !(this.values[2] "" == "" value2) ; Prevent unnecessary redraw and flicker.
             || (had_children != prop.getAttribute("children"))
             tlv.RefreshValues(this)
-        this.UpdateChildren(tlv, props)
+        this.UpdateChildren(tlv, props, this.args)
     }
 }
 
 class DvContextNode extends DvPropertyParentNode
 {
     static expandable := true
+    static depth := 0
     
     __new(dbg, context) {
         this.dbg := dbg
@@ -236,14 +259,14 @@ class DvContextNode extends DvPropertyParentNode
     }
     
     GetProperties() {
-        this.dbg.context_get("-c " this.context, response)
+        this.dbg.context_get("-c" this.context " -d" this.depth, response)
         xml := DvLoadXml(response)
         return xml.selectNodes("/response/property")
     }
     
     GetChildren() {
         props := this.GetProperties()
-        return DvPropertyNode.FromXmlNodes(props, this.dbg)
+        return DvPropertyNode.FromXmlNodes(props, this.dbg, "-c" this.context " -d" this.depth)
     }
     
     GetWindowTitle() {
@@ -253,7 +276,7 @@ class DvContextNode extends DvPropertyParentNode
     
     Update(tlv) {
         props := this.GetProperties()
-        this.UpdateChildren(tlv, props)
+        this.UpdateChildren(tlv, props, "-c" this.context " -d" this.depth)
     }
 }
 
@@ -299,7 +322,7 @@ class DebugVarsGui extends VarTreeGui
         }
         
         LV_Key_Enter(r, node) {
-            DvInspectProperty(node.dbg, node.xml.getAttribute("fullname"))
+            DvInspectProperty(node.dbg, node.fullname, node.args)
         }
     }
     
@@ -341,7 +364,7 @@ class DebugVarsGui extends VarTreeGui
     }
     
     InspectNode(node) {
-        DvInspectProperty(node.dbg, node.xml.getAttribute("fullname"))
+        DvInspectProperty(node.dbg, node.fullname, node.args)
     }
     
     NewWindow(node) {
